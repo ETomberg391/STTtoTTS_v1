@@ -1,0 +1,170 @@
+@app.post('/v1/audio/speechGenerations', dependencies=check_key)
+async def handle_audio_speech_generation(request: Request, file: UploadFile = File(...), model: str = Form('base'), instruction_template: str = Form("Mistral")):
+    audio_file_bytes = await file.read()
+    temp_file_path = os.path.join(tempfile.gettempdir(), 'temp_audio_file')
+
+    # Save the audio file bytes to a temporary file
+    with open(temp_file_path, 'wb') as temp_file:
+        temp_file.write(audio_file_bytes)
+
+    whisper_model = whisper.load_model(model)
+
+    try:
+        # Load the audio and pad/trim it
+        audio = whisper.load_audio(temp_file_path)
+        audio = whisper.pad_or_trim(audio)
+
+        # Make log-Mel spectrogram and move to the same device as the model
+        mel = whisper.log_mel_spectrogram(audio).to(whisper_model.device)
+
+        # Set the target language to English
+        target_language = 'en'
+
+        # Decode the audio
+        options = whisper.DecodingOptions(language=target_language, without_timestamps=True)
+        result = whisper.decode(whisper_model, mel, options)
+
+        transcription = result.text
+        print("Transcription:", transcription)
+
+        # Generate a response using your AI LLM
+        completion_request = CompletionRequest(
+            model="mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf",
+            prompt=f"{instruction_template}\n\nTranscription: {transcription}\n\nAssistant:",
+            max_tokens=250,
+            temperature=0.7,
+            top_p=0.9,
+            frequency_penalty=0.2,
+            presence_penalty=0.2,
+            stop=None,
+            repetition_penalty=1.15,
+        )
+
+        response = OAIcompletions.completions(to_dict(completion_request))
+        generated_text = response['choices'][0]['text']
+
+        # Remove HTML tags from the generated text
+        generated_text = re.sub(r'<[^<]+?>', '', generated_text)
+
+        state = {}  # Create an empty state dictionary
+
+        try:
+            alltalk_api_url = "http://127.0.0.1:7851/api/tts-generate"
+            alltalk_params = {
+                "text_input": generated_text,
+                "text_filtering": "standard",
+                "character_voice_gen": "female_01.wav",
+                "narrator_enabled": "false",
+                "narrator_voice_gen": "male_01.wav",
+                "text_not_inside": "character",
+                "language": "en",
+                "output_file_name": "myoutputfile",
+                "output_file_timestamp": "true",
+                "autoplay": "false",
+                "autoplay_volume": "0.8"
+            }
+
+            response = requests.post(alltalk_api_url, data=alltalk_params)
+            response_data = response.json()
+
+            if response_data["status"] == "generate-success":
+                audio_file_path = response_data["output_file_path"]
+                return FileResponse(audio_file_path, media_type="audio/wav")
+            else:
+                print('Audio generation failed. Alltalk API returned an error.')
+                return JSONResponse(content={'error': 'Audio generation failed. Alltalk API returned an error.'}, status_code=500)
+
+        except Exception as e:
+            print('Error occurred during speech generation:', e)
+            return JSONResponse(content={'error': 'An error occurred while processing the audio. Please try again later.'}, status_code=500)
+
+    finally:
+        # Remove the temporary files
+        os.remove(temp_file_path)
+  
+@app.post('/v1/audio/speechAndTextGenerations', dependencies=check_key)
+async def handle_audio_speech_and_text_generation(request: Request, file: UploadFile = File(...), model: str = Form('base'), instruction_template: str = Form("Mistral")):
+    audio_file_bytes = await file.read()
+    temp_file_path = os.path.join(tempfile.gettempdir(), 'temp_audio_file')
+
+    # Save the audio file bytes to a temporary file
+    with open(temp_file_path, 'wb') as temp_file:
+        temp_file.write(audio_file_bytes)
+
+    whisper_model = whisper.load_model(model)
+
+    try:
+        # Load the audio and pad/trim it
+        audio = whisper.load_audio(temp_file_path)
+        audio = whisper.pad_or_trim(audio)
+
+        # Make log-Mel spectrogram and move to the same device as the model
+        mel = whisper.log_mel_spectrogram(audio).to(whisper_model.device)
+
+        # Set the target language to English
+        target_language = 'en'
+
+        # Decode the audio
+        options = whisper.DecodingOptions(language=target_language, without_timestamps=True)
+        result = whisper.decode(whisper_model, mel, options)
+        transcription = result.text
+        print("Transcription:", transcription)
+
+        # Generate a response using your AI LLM
+        completion_request = CompletionRequest(
+            model="mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf",
+            prompt=f"{instruction_template}\n\nTranscription: {transcription}\n\nAssistant:",
+            max_tokens=250,
+            temperature=0.7,
+            top_p=0.9,
+            frequency_penalty=0.2,
+            presence_penalty=0.2,
+            stop=None,
+            repetition_penalty=1.15,
+        )
+        response = OAIcompletions.completions(to_dict(completion_request))
+        generated_text = response['choices'][0]['text']
+
+        # Remove HTML tags from the generated text
+        generated_text = re.sub(r'<[^<]+?>', '', generated_text)
+
+        state = {}  # Create an empty state dictionary
+
+        try:
+            alltalk_api_url = "http://127.0.0.1:7851/api/tts-generate"
+            alltalk_params = {
+                "text_input": generated_text,
+                "text_filtering": "standard",
+                "character_voice_gen": "female_01.wav",
+                "narrator_enabled": "false",
+                "narrator_voice_gen": "male_01.wav",
+                "text_not_inside": "character",
+                "language": "en",
+                "output_file_name": "myoutputfile",
+                "output_file_timestamp": "true",
+                "autoplay": "false",
+                "autoplay_volume": "0.8"
+            }
+            response = requests.post(alltalk_api_url, data=alltalk_params)
+            response_data = response.json()
+
+            if response_data["status"] == "generate-success":
+                audio_file_path = response_data["output_file_path"]
+                audio_file_name = os.path.basename(audio_file_path)
+
+                return JSONResponse(content={
+                    "audio_url": f"/audio/{audio_file_name}",
+                    "generated_text": generated_text,
+                    "transcription": transcription
+                })
+            else:
+                print('Audio generation failed. Alltalk API returned an error.')
+                return JSONResponse(content={'error': 'Audio generation failed. Alltalk API returned an error.'}, status_code=500)
+
+        except Exception as e:
+            print('Error occurred during speech generation:', e)
+            return JSONResponse(content={'error': 'An error occurred while processing the audio. Please try again later.'}, status_code=500)
+
+    finally:
+        # Remove the temporary files
+        os.remove(temp_file_path)
