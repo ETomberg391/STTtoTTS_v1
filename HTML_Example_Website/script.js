@@ -258,3 +258,4 @@ function displayErrorMessage(text) {
   const labelElement = document.createElement('p');
   labelElement.classList.add('message-label');
   labelElement.textContent = 'Error:';
+}
